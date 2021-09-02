@@ -20,6 +20,11 @@
 .export dl_start
 .export dl_end
 
+	;;	XXX this is wrong
+	;;	instead of [b] <- [b]-[a]
+	;;	we do		[b] <- [a]-[b]
+	;;	correction: negate [a], not [b]
+
 
 dl_start:
 	; enable reading from both ports, we're in bank0, DL enabled
@@ -188,45 +193,35 @@ negtable:
 	; 127, 126, ..., 0 (@$80), -1, ..., -127, -128 ; (x :-> -x), but [$7f, ..., 0, $ff, $fe, ..., $80]?
 
 vm_start:
-	; subleq program starts here, addresses must be absolute, not relative to vm_start
-	; <negative-jmp> <positive-jmp> <a> <b>; [b]<-[a]-[b]; if [a]-[b]<=0 then [negative-jmp] else [positive-jmp]
-
-	; sub
-	.word :+, :+, seven, three	; 7-3=4, store '4' at location 'three'
-	; add
-:	.word :+, :+, two, isseven
-:	.word :+, :+, isseven, five
-:	.word :+, :+, isseven, isseven
-	; infinite loop
-:	.word :-, :-, zero, zero
 
 zero:	.byte 0		; literal 0
-seven: .byte 7
-three: .byte 3	; this should contain 4 after running
+seven:	.byte 7
+three:	.byte 3
 
 two:	.byte 2
 five:	.byte 5
-isseven:	.byte 0 ; this should contain 7 after running
+isseven:	.byte 0
 
+	; subleq program starts here, addresses must be absolute, not relative to vm_start
+	; <negative-jmp> <positive-jmp> <a> <b>; [b]<-[b]-[a]; if [b]-[a]<=0 then [negative-jmp] else [positive-jmp]
 
 	.macro subleq addr_a, addr_b, jump_c
 	.ifnblank jump_c
-		.word jump_c
+		.word jump_c	; where to jump if negative
 	.else
-		.word :+
+		.word :+	; if ommited then point to the next instruction
 	.endif
-		.word :+, addr_a, addr_b
+		.word :+, addr_a, addr_b	; link to next instruction; [a]; [b]
 	:
 	.endmacro
 
-	subleq seven, three
-	subleq two, isseven
-	subleq isseven, five
-	subleq isseven, isseven
-:	subleq zero, zero, :-
+	subleq three, seven		; 7-3=4, seven=4
+	subleq two, isseven		; 0-2=-2, isseven=-2
+	subleq isseven, five		; 5-(-2)=5+2=7, five=7
+:	subleq zero, zero, :-		; infinite loop
+:	.word :-, :-, zero, zero	; this is also infinite loop
 
 dl_end:
 dl_end_opcode:
 	END
-
 
