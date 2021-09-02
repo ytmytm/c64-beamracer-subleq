@@ -8,12 +8,6 @@
 
 	.include "vlib/vlib.s"
 
-; ?-? - DL
-; ?+[0000-01ff] - tabela odejmowań (256x1 (take branch), 255x0 (skip branch))
-; ?+[0200-ffff] - VMem
-
-; : <addr-leq:16> <addr-pos==:+8> <addr1:16> <addr2:16>
-
 
 	.segment "VASYL"
 
@@ -22,11 +16,10 @@
 .export dl_restart
 .export mainloop
 
-	;;	XXX this is wrong
-	;;	instead of [b] <- [b]-[a]
-	;;	we do		[b] <- [a]-[b]
-	;;	correction: negate [a], not [b]
-
+	;; instruction action:
+	;;	[b] <- [b]-[a] = -[a]+[b]; if b<=0 then goto 0
+	;; instruction encoding:
+	;; (address to jump when result negative or zero - c) (address to jump when result positive) (address of a) (address of b (result))
 
 dl_start:
 	; enable reading from both ports, we're in bank0, DL enabled
@@ -38,7 +31,7 @@ dl_start:
 	MOV		VREG_DLISTL, <dl_restart
 	MOV		VREG_DLISTH, >dl_restart
 dl_restart:
-	SETB		80		;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
+	SETB		160		;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
 					;; ~85 instructions per loop, 170 cycles, 63 cycles per scanline ~3 lines, 80x3=240 - safe default
 	MOV		$20, 2		;; indicator start
 mainloop:
@@ -85,7 +78,7 @@ mainback:
 	BRA mainloop	; we need this intermediate trampoline to go back more than 127 bytes from the end of the code to the beginning
 
 
-	;; read value from [a], put as step0 in two places, step0/1 set to 0, because we need this value twice
+	;; read value from [a], put as step0 one place, to be negated, step0/1 set to 0, because we need this value twice
 ;	MOV		VREG_STEP0, 0	; step0 is already 0
 ;	MOV		VREG_STEP1, 0	; step1 is already 0
 addr1:
@@ -94,46 +87,46 @@ addr1:
 	MOV		VREG_ADR1, <(addrval_a+1)
 	MOV		VREG_ADR1+1, >(addrval_a+1)
 	XFER		VREG_PORT1, (0)
-	MOV		VREG_ADR1, <(addrval_a2+1)
-	MOV		VREG_ADR1+1, >(addrval_a2+1)
-	XFER		VREG_PORT1, (0)
 addr2:
 	;; read value from [b], put as step0, step0/1 don't matter (still 0)
 	MOV		VREG_ADR0, 0	; this will be modified
-	MOV		VREG_ADR0+1, 0	; this will be modifid
+	MOV		VREG_ADR0+1, 0	; this will be modified
 	MOV		VREG_ADR1, <(addrval_b+1)
 	MOV		VREG_ADR1+1, >(addrval_b+1)
+	XFER		VREG_PORT1, (0)
+	MOV		VREG_ADR1, <(addrval_b2+1)
+	MOV		VREG_ADR1+1, >(addrval_b2+1)
 	XFER		VREG_PORT1, (0)
 
 	;; first indexed read - what is -[b]? put it into addrval_bneg2 and addrval_bneg as step0 values
 	MOV		VREG_ADR0,	<(negtable+$80)		; middle of the table, position of 0
 	MOV		VREG_ADR0+1, >(negtable+$80)	; middle of the table, position of 0
-	MOV		VREG_ADR1,	<(addrval_bneg+1)
-	MOV		VREG_ADR1+1, >(addrval_bneg+1)
-addrval_b:
-	MOV		VREG_STEP0, 0		; this will be set to value from [b]
-	XFER		VREG_PORT1, (0)		; read once and advance port0 by [b], but step1 is still 0
+	MOV		VREG_ADR1,	<(addrval_aneg+1)
+	MOV		VREG_ADR1+1, >(addrval_aneg+1)
+addrval_a:
+	MOV		VREG_STEP0, 0		; this will be set to value from [a]
+	XFER		VREG_PORT1, (0)		; read once and advance port0 by [a], but step1 is still 0
 	MOV		VREG_STEP0, 0		; dont advance now, we need this value twice
-	XFER		VREG_PORT1, (0)		; read -[b] and store at addrval_bneg
-	MOV		VREG_ADR1, <(addrval_bneg2+1)
-	MOV		VREG_ADR1+1, >(addrval_bneg2+1)
-	XFER		VREG_PORT1, (0)		; read -[b] and store at addrval_bneg2
+	XFER		VREG_PORT1, (0)		; read -[a] and store at addrval_aneg
+	MOV		VREG_ADR1, <(addrval_aneg2+1)
+	MOV		VREG_ADR1+1, >(addrval_aneg2+1)
+	XFER		VREG_PORT1, (0)		; read -[a] and store at addrval_aneg2
 
-	;; is [a]-[b]>0?
+	;; is [b]-[a]>0?
 	MOV		VREG_STEP1, 0	; PORT1 will be written thrice, we only want to know last value
 	MOV		VREG_ADR0,   <(signtable+$100)	; middle of the table, position of '0'
 	MOV		VREG_ADR0+1, >(signtable+$100)	; middle of the table, position of '0'
 	MOV		VREG_ADR1, <(setaval+1)
 	MOV		VREG_ADR1+1, >(setaval+1)
-addrval_a:
-	MOV		VREG_STEP0, 0		; step here will be [a] value (-128,127)
-	XFER		VREG_PORT1, (0)		; read value at 0, move from 0 to [a] value
-addrval_bneg:
-	MOV		VREG_STEP0, 0		; step here will be -[b] value (-128,127)
-	XFER		VREG_PORT1, (0)		; read value at [a], move from [a] to -[b] value
+addrval_aneg:
+	MOV		VREG_STEP0, 0		; step here will be -[a] value (-128,127)
+	XFER		VREG_PORT1, (0)		; read value at 0, move from 0 to -[a] value
+addrval_b:
+	MOV		VREG_STEP0, 0		; step here will be [b] value (-128,127)
+	XFER		VREG_PORT1, (0)		; read value at -[a], move from -[a] to [b] value
 	XFER		VREG_PORT1, (0)		; finally read sign of subtraction result - 0 to skip BRA or <>0 to run BRA
 
-	;; what is the actual value [a]-[b]?
+	;; what is the actual value [b]-[a]?
 	MOV		VREG_STEP1, 0	; PORT1 will be written thrice, we only want to know last value
 	MOV		VREG_ADR0,   <(subtable+$100)	; middle of the table, position of '0'
 	MOV		VREG_ADR0+1, >(subtable+$100)	; middle of the table, position of '0'
@@ -141,12 +134,12 @@ addr2_2:
 	;; store result in b
 	MOV		VREG_ADR1, 0		; this will be modified
 	MOV		VREG_ADR1+1, 0		; this will be modified
-addrval_a2:
-	MOV		VREG_STEP0, 0		; step here will be [a] value (-128,127)
-	XFER		VREG_PORT1, (0)		; read value at 0, move from 0 to [a] value
-addrval_bneg2:
-	MOV		VREG_STEP0, 0		; step here will be -[b] value (-128,127)
-	XFER		VREG_PORT1, (0)		; read value at [a], move from [a] to -[b] value
+addrval_aneg2:
+	MOV		VREG_STEP0, 0		; step here will be -[a] value (-128,127)
+	XFER		VREG_PORT1, (0)		; read value at 0, move from 0 to -[a] value
+addrval_b2:
+	MOV		VREG_STEP0, 0		; step here will be [b] value (-128,127)
+	XFER		VREG_PORT1, (0)		; read value at -[a], move from -[a] to [b] value
 	XFER		VREG_PORT1, (0)		; finally read subtraction result, store at addr2
 
 setaval:
@@ -166,6 +159,7 @@ pcleq:
 pcrun:
 	DECB			 ; do we still have time in current frame?
 	BRA		mainback ; yes, back to mainloop
+d020_val:
 	MOV		$20, 0	 ; no, end this DL run
 	END
 
@@ -214,6 +208,7 @@ zero:	.byte 0		; literal 0
 seven:	.byte 7
 three:	.byte 3
 
+one:	.byte <(-1)
 two:	.byte 2
 five:	.byte 5
 isseven:	.byte 0
@@ -244,7 +239,9 @@ isseven:	.byte 0
 	subleq two, isseven		; 0-2=-2, isseven=-2
 	subleq isseven, five		; 5-(-2)=5+2=7, five=7
 	subleq isseven			; zero-out location isseven
-:	subleq zero, zero, :-		; infinite loop
+sloop:	subleq one, d020_val+1
+	.word sloop, sloop, one, d020_val+1
+	subleq zero, zero, sloop	; infinite loop
 :	.word :-, :-, zero, zero	; this is also infinite loop
 
 dl_end:
