@@ -206,18 +206,28 @@ isseven:	.byte 0
 	; <negative-jmp> <positive-jmp> <a> <b>; [b]<-[b]-[a]; if [b]-[a]<=0 then [negative-jmp] else [positive-jmp]
 
 	.macro subleq addr_a, addr_b, jump_c
+	.ifblank addr_a
+		.error "SUBLEQ: first argument required for subleq macro"
+	.endif
 	.ifnblank jump_c
 		.word jump_c	; where to jump if negative
 	.else
 		.word :+	; if ommited then point to the next instruction
 	.endif
-		.word :+, addr_a, addr_b	; link to next instruction; [a]; [b]
+		.word :+	; link to next instruction (required for VASYL, not existing in pure Subleq)
+		.word addr_a	; [a]
+	.ifnblank addr_b
+		.word addr_b	; [b], [b]<-[b]-[a]
+	.else
+		.word addr_a	; if 2nd argument is omitted reuse [a]
+	.endif
 	:
 	.endmacro
 
 	subleq three, seven		; 7-3=4, seven=4
 	subleq two, isseven		; 0-2=-2, isseven=-2
 	subleq isseven, five		; 5-(-2)=5+2=7, five=7
+	subleq isseven			; zero-out location isseven
 :	subleq zero, zero, :-		; infinite loop
 :	.word :-, :-, zero, zero	; this is also infinite loop
 
