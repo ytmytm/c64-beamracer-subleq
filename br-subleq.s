@@ -19,6 +19,8 @@
 
 .export dl_start
 .export dl_end
+.export dl_restart
+.export mainloop
 
 	;;	XXX this is wrong
 	;;	instead of [b] <- [b]-[a]
@@ -33,8 +35,12 @@ dl_start:
 	MOV		VREG_ADR0, <vm_start	; this can be done from C64 setup
 	MOV		VREG_ADR0+1, >vm_start
 	; make DL restart at mainloop so that program continues in the new frame
-	MOV		VREG_DLISTL, <mainloop
-	MOV		VREG_DLISTH, >mainloop
+	MOV		VREG_DLISTL, <dl_restart
+	MOV		VREG_DLISTH, >dl_restart
+dl_restart:
+	SETB		80		;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
+					;; ~85 instructions per loop, 170 cycles, 63 cycles per scanline ~3 lines, 80x3=240 - safe default
+	MOV		$20, 2		;; indicator start
 mainloop:
 	MOV		VREG_STEP0, 1
 	MOV		VREG_STEP1, 2	;; skip 2 bytes - over next 2 instructions for all self-modifying writes
@@ -151,20 +157,21 @@ setaval:
 pcpos:
 	MOV		VREG_ADR0, 0		; branch not taken, take next instruction
 	MOV		VREG_ADR0+1, 0
-	BRA		mainback; loop
+	BRA		pcrun
 
 pcleq:
 	MOV		VREG_ADR0, 0		; branch taken
 	MOV		VREG_ADR0+1, 0
-	BRA		mainback; loop
+
+pcrun:
+	DECB			 ; do we still have time in current frame?
+	BRA		mainback ; yes, back to mainloop
+	MOV		$20, 0	 ; no, end this DL run
+	END
 
 .export signtable
 .export subtable
 .export negtable
-.export vm_start
-.export isseven
-.export three
-.export five
 
 signtable:
 	.repeat 256	; negative numbers
@@ -193,6 +200,15 @@ negtable:
 	; 127, 126, ..., 0 (@$80), -1, ..., -127, -128 ; (x :-> -x), but [$7f, ..., 0, $ff, $fe, ..., $80]?
 
 vm_start:
+
+.export vm_start
+.export zero
+.export seven
+.export three
+.export two
+.export five
+.export isseven
+
 
 zero:	.byte 0		; literal 0
 seven:	.byte 7
