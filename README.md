@@ -1,5 +1,5 @@
 
-# 16-bit SUBLEQ Virtual Machine for BeamRacer
+# 8-bit SUBLEQ Virtual Machine for BeamRacer
 
 * Author: Maciej 'YTM/Elysium' Witkowiak <ytm@elysium.pl>
 * License: Public Domain
