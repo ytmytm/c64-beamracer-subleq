@@ -1,4 +1,11 @@
 
+; BeamRacer SUBLEQ Virtual Machine
+;
+; Maciej 'YTM/Elysium' Witkowiak, 2021
+;
+
+
+
         .include "vlib/vasyl.s"
 
         jsr knock_knock
@@ -156,11 +163,9 @@ d020_val:
 	MOV		$20, 15	 ; no, end this DL run
 	END
 
-.export signtable
-.export addtable
-.export negtable
-
 signtable:
+	; table with sign information, (1=negative or 0, 0=positive)
+	; note: first/last 128 bytes indicate +/- overflow, in add table they are (respectively) positive/negative, should this be consistent with information here as well?
 	.repeat 256	; negative numbers
 	.byte 1
 	.endrepeat
@@ -170,6 +175,7 @@ signtable:
 	.endrepeat
 
 addtable:
+	; table for adding numbers, index by offset rom the middle
 	.repeat 256, I
 	.byte I
 	.endrepeat
@@ -178,6 +184,7 @@ addtable:
 	.endrepeat
 
 negtable:
+	; table for negating numbers, index by offset from the middle
 	.repeat 128, I
 	.byte 128-I
 	.endrepeat
@@ -185,24 +192,6 @@ negtable:
 	.byte <(-I)
 	.endrepeat
 	; 0, 127, 126, ..., 0 (@$80), -1=$FF, -2=$FE ..., -127, -128 ; (x :-> -x), but [$7f, ..., 0, $ff, $fe, ..., $80]?
-
-.export vm_start
-.export zero
-.export seven
-.export three
-.export two
-.export five
-.export isseven
-
-
-zero:	.byte 0		; literal 0
-seven:	.byte 7
-three:	.byte 3
-
-one:	.byte 1
-two:	.byte 2
-five:	.byte 5
-isseven:	.byte 0
 
 	; subleq program encoding
 	; <negative-jmp> <positive-jmp> <a> <b>; [b]<-[b]-[a]; if [b]-[a]<=0 then [negative-jmp] else [positive-jmp]
@@ -228,19 +217,48 @@ isseven:	.byte 0
 
 vm_start:
 	; subleq program starts here, addresses must be absolute, not relative to vm_start
+
+	; debug cases for jumps:
+;	subleq three, seven, sloop ; 7-3=4 4>=0 so no jump to sloop, infinite loop with no visuals
+;	subleq seven, three, sloop ; 3-7=-4 4<0 so jump to sloop, infinite loop with visuals
+;	subleq seven, seven, sloop ; 7-7=0, 0=0 so jump to sloop, infinite loop with visuals
+;:	subleq zero, zero, :-	; infinite loop with no visuals
+
+	; debug cases for arithmetics
 	subleq three, seven		; 7-3=4, seven=4
 	subleq two, isseven		; 0-2=-2, isseven=-2
 	subleq isseven, five		; 5-(-2)=5+2=7, five=7
 	subleq isseven			; zero-out location isseven
-sloop:
+
+sloop:	; infinite loop that changes border color by modifying display list directly
 	.word sloop, sloop, one, d020_val+1
 	subleq zero, zero, sloop	; infinite loop
 :	.word :-, :-, zero, zero	; this is also infinite loop
+
+	; subleq data space - memory, constants, registers, variables
+zero:	.byte 0		; literal 0
+seven:	.byte 7
+three:	.byte 3
+
+one:	.byte 1
+two:	.byte 2
+five:	.byte 5
+isseven:	.byte 0
 
 ; all the exports for debug purposes
 ; vpeek(seven) should be 4
 ; vpeek(isseven) should be 0
 ; vpeek(five) sohuld be 7
+.export signtable
+.export addtable
+.export negtable
+.export vm_start
+.export zero
+.export seven
+.export three
+.export two
+.export five
+.export isseven
 .export dl_start
 .export dl_restart
 .export mainloop
