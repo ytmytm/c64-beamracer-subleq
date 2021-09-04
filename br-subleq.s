@@ -8,13 +8,8 @@
 
 	.include "vlib/vlib.s"
 
-
 	.segment "VASYL"
 
-.export dl_start
-.export dl_end
-.export dl_restart
-.export mainloop
 
 	;; instruction action:
 	;;	[b] <- [b]-[a] = -[a]+[b]; if b<=0 then goto 0
@@ -31,8 +26,8 @@ dl_start:
 	MOV		VREG_DLISTL, <dl_restart
 	MOV		VREG_DLISTH, >dl_restart
 dl_restart:
-	SETB		160		;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
-					;; ~85 instructions per loop, 170 cycles, 63 cycles per scanline ~3 lines, 80x3=240 - safe default
+	SETB		214 ;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
+					;; 214 is max, maybe even 215, this can be increased if all redundant writes to ADR0/1 high-bytes are optimized away
 	MOV		$20, 2		;; indicator start
 mainloop:
 	MOV		VREG_STEP0, 1
@@ -77,10 +72,7 @@ mainloop:
 mainback:
 	BRA mainloop	; we need this intermediate trampoline to go back more than 127 bytes from the end of the code to the beginning
 
-
 	;; read value from [a], put as step0 one place, to be negated, step0/1 set to 0, because we need this value twice
-;	MOV		VREG_STEP0, 0	; step0 is already 0
-;	MOV		VREG_STEP1, 0	; step1 is already 0
 addr1:
 	MOV		VREG_ADR0, 0	; this will be modified
 	MOV		VREG_ADR0+1, 0	; this will be modified
@@ -98,7 +90,7 @@ addr2:
 	MOV		VREG_ADR1+1, >(addrval_b2+1)
 	XFER		VREG_PORT1, (0)
 
-	;; first indexed read - what is -[b]? put it into addrval_bneg2 and addrval_bneg as step0 values
+	;; first indexed read - what is -[a]? put it into addrval_aneg2 and addrval_aneg as step0 values
 	MOV		VREG_ADR0,	<(negtable+$80)		; middle of the table, position of 0
 	MOV		VREG_ADR0+1, >(negtable+$80)	; middle of the table, position of 0
 	MOV		VREG_ADR1,	<(addrval_aneg+1)
@@ -128,8 +120,8 @@ addrval_b:
 
 	;; what is the actual value [b]-[a]?
 	MOV		VREG_STEP1, 0	; PORT1 will be written thrice, we only want to know last value
-	MOV		VREG_ADR0,   <(subtable+$100)	; middle of the table, position of '0'
-	MOV		VREG_ADR0+1, >(subtable+$100)	; middle of the table, position of '0'
+	MOV		VREG_ADR0,   <(addtable+$100)	; middle of the table, position of '0'
+	MOV		VREG_ADR0+1, >(addtable+$100)	; middle of the table, position of '0'
 addr2_2:
 	;; store result in b
 	MOV		VREG_ADR1, 0		; this will be modified
@@ -157,14 +149,15 @@ pcleq:
 	MOV		VREG_ADR0+1, 0
 
 pcrun:
+d020_val:
+	MOV		$20, 6	;; debug indicator
 	DECB			 ; do we still have time in current frame?
 	BRA		mainback ; yes, back to mainloop
-d020_val:
-	MOV		$20, 0	 ; no, end this DL run
+	MOV		$20, 15	 ; no, end this DL run
 	END
 
 .export signtable
-.export subtable
+.export addtable
 .export negtable
 
 signtable:
@@ -176,24 +169,22 @@ signtable:
 	.byte 0
 	.endrepeat
 
-subtable:
-	.repeat 128
-	.byte <(-128)	; negative overflow
+addtable:
+	.repeat 256, I
+	.byte I
 	.endrepeat
 	.repeat 256, I
-	.byte <(-128+I)	; -128, -127, ..., 0, 1, 2, 3, ..., 127
-	.endrepeat
-	.repeat 128
-	.byte 127	; positive overflow
+	.byte I
 	.endrepeat
 
 negtable:
 	.repeat 128, I
+	.byte 128-I
+	.endrepeat
+	.repeat 128, I
 	.byte <(-I)
 	.endrepeat
-	; 127, 126, ..., 0 (@$80), -1, ..., -127, -128 ; (x :-> -x), but [$7f, ..., 0, $ff, $fe, ..., $80]?
-
-vm_start:
+	; 0, 127, 126, ..., 0 (@$80), -1=$FF, -2=$FE ..., -127, -128 ; (x :-> -x), but [$7f, ..., 0, $ff, $fe, ..., $80]?
 
 .export vm_start
 .export zero
@@ -208,12 +199,12 @@ zero:	.byte 0		; literal 0
 seven:	.byte 7
 three:	.byte 3
 
-one:	.byte <(-1)
+one:	.byte 1
 two:	.byte 2
 five:	.byte 5
 isseven:	.byte 0
 
-	; subleq program starts here, addresses must be absolute, not relative to vm_start
+	; subleq program encoding
 	; <negative-jmp> <positive-jmp> <a> <b>; [b]<-[b]-[a]; if [b]-[a]<=0 then [negative-jmp] else [positive-jmp]
 
 	.macro subleq addr_a, addr_b, jump_c
@@ -235,16 +226,33 @@ isseven:	.byte 0
 	:
 	.endmacro
 
+vm_start:
+	; subleq program starts here, addresses must be absolute, not relative to vm_start
 	subleq three, seven		; 7-3=4, seven=4
 	subleq two, isseven		; 0-2=-2, isseven=-2
 	subleq isseven, five		; 5-(-2)=5+2=7, five=7
 	subleq isseven			; zero-out location isseven
-sloop:	subleq one, d020_val+1
+sloop:
 	.word sloop, sloop, one, d020_val+1
 	subleq zero, zero, sloop	; infinite loop
 :	.word :-, :-, zero, zero	; this is also infinite loop
 
-dl_end:
-dl_end_opcode:
-	END
-
+; all the exports for debug purposes
+; vpeek(seven) should be 4
+; vpeek(isseven) should be 0
+; vpeek(five) sohuld be 7
+.export dl_start
+.export dl_restart
+.export mainloop
+.export pcleq
+.export pcpos
+.export addr1
+.export addr2
+.export addr2_2
+.export addrval_a
+.export addrval_aneg
+.export addrval_aneg2
+.export addrval_b
+.export addrval_b2
+.export setaval
+.export d020_val
