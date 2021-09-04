@@ -113,7 +113,9 @@ This structure is wrapped in macro `subleq` with one required and two optional a
 Reference SUBLEQ implementations use a special memory address (-1, $FFFF) for I/O. For example writing something to $FFFF means
 printing out a character in Forth implementation linked below.
 
-We don't have this luxury here, but there are some ways how SUBLEQ program can indicate that is has completed:
+Data exchange can be done through memory ports in both directions, but only when SUBLEQ program is not running. It's easy to start the program - just enable Display List.
+
+There are some ways how SUBLEQ program can indicate to the host computer that is has completed:
 
 * it can modify VM's display list and just make it stop by writing END opcode into it or by encoding a write to control register
 * it can make display list write a special value to one of VIC registers
@@ -138,6 +140,10 @@ vm_start:				; program starts here
 # Future
 
 Can we have shaders processing bitmaps and running natively in VASYL?
+
+We would need some sort of assembly lanugage built upon macros on top of `subleq` instruction for easier programming.
+
+There is already a Forth implementation (linked below), maybe that can be reused?
 
 # References
 
