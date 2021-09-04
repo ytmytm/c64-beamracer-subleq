@@ -72,7 +72,7 @@ While the display list is running you can't modify any PORT0/PORT1 settings.
 The display list is restarted on every frame (50 times per second) and we can't allow this happen in the middle of processing SUBLEQ instruction. Therefore there is an upper limit to how many SUBLEQ instructions can be safely executed every frame.
 Without more optimizations currently this is about 214.
 
-Therefore this virtual SUBLEQ CPu runs clocked at about 10.7 kHz (214*50).
+Therefore this virtual SUBLEQ CPU runs clocked at about 10.7 kHz (214*50).
 
 ## Available memory
 
