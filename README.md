@@ -51,7 +51,7 @@ There is a very nice introduction to SUBLEQ on [esolangs.org](https://esolangs.o
 
 # VASYL SUBLEQ VM
 
-Almost whole Display List program in [br-subleq.c](br-subleq.c) is devoted to running the virtual machine.
+Almost whole Display List program in [br-subleq.s](br-subleq.s) is devoted to running the virtual machine.
 
 ## Implementation
 
