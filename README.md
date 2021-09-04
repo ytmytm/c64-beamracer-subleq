@@ -24,10 +24,11 @@ Here all we need to know that BeamRacer contains a coprocessor called VASYL
 VASYL is not suited for general computing because the instruction set and features are very limited:
 
 * no arithmetic instructions (add/sub), there is only decrementation of an internal counter
-* no CPU flags (zero, carry)
-* the only kind of conditional branch is when internal counter reaches zero, than an unconditional jump instruction can be skipped
-* you can write to registers, but you can't read them
-* you can only read from one of two memory access ports
+* no CPU flags (zero, carry, sign)
+* the only kind of conditional jump is when internal counter reaches zero, then a following unconditional jump instruction can be skipped
+* you can read **only** from one of two memory access ports
+* you can write **only** to control registers (fortunately two of them being memory access ports)
+* there are no general purpose registers, like A, X or Y on 6502 CPU
 * there is no stack
 
 # What is SUBLEQ?
@@ -144,6 +145,8 @@ Can we have shaders processing bitmaps and running natively in VASYL?
 We would need some sort of assembly lanugage built upon macros on top of `subleq` instruction for easier programming.
 
 There is already a Forth implementation (linked below), maybe that can be reused?
+
+I'm not an experienced SUBLEQ programmer so the only examples I provide are debug cases at the end of [br-subleq.s](br-subleq.s).
 
 # References
 
