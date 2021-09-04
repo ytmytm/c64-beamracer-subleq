@@ -1,7 +1,7 @@
 
 # 16-bit SUBLEQ Virtual Machine for BeamRacer
 
-* Author: Maciej Witkowiak <ytm@elysium.pl>
+* Author: Maciej 'YTM/Elysium' Witkowiak <ytm@elysium.pl>
 * License: Public Domain
 
 This project contains a virtual machine for programs written in SUBLEQ.
