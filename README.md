@@ -150,7 +150,7 @@ I'm not an experienced SUBLEQ programmer so the only examples I provide are debu
 
 # References
 
-* https://esolangs.org/wiki/Subleq (Turorial)
+* https://esolangs.org/wiki/Subleq (Tutorial)
 * https://github.com/howerj/subleq (Forth)
 * https://en.wikipedia.org/wiki/One-instruction_set_computer
 * https://hackaday.io/project/158329-dawn-the-subleq-operating-system-by-geri
@@ -158,3 +158,4 @@ I'm not an experienced SUBLEQ programmer so the only examples I provide are debu
 * https://github.com/davidar/subleq (simulator and libraries)
 * https://rosettacode.org/wiki/Subleq (implementations of Subleq VMs in various languages)
 * https://iq.opengenus.org/one-instruction-set-computer-oisc/ (JUMP, MOVE, ADD, NOT commands)
+* https://stackoverflow.com/questions/34120161/bitwise-operations-in-subleq (bitwise operators)
