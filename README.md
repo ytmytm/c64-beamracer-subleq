@@ -1,9 +1,8 @@
 
 # 16-bit SUBLEQ Virtual Machine for BeamRacer
 
-* Author: Maciej Witkowiak
-* Email: <mailto:ytm@elysium.pl>
-* License: [The Unlicense](LICENSE) / Public Domain
+* Author: Maciej Witkowiak <ytm@elysium.pl>
+* License: Public Domain
 
 This project contains a virtual machine for programs written in SUBLEQ.
 
@@ -142,10 +141,10 @@ Can we have shaders processing bitmaps and running natively in VASYL?
 
 # References
 
-* https://esolangs.org/wiki/Subleq
-* https://github.com/howerj/subleq (forth)
+* https://esolangs.org/wiki/Subleq (Turorial)
+* https://github.com/howerj/subleq (Forth)
 * https://en.wikipedia.org/wiki/One-instruction_set_computer
 * https://hackaday.io/project/158329-dawn-the-subleq-operating-system-by-geri
-* https://www.researchgate.net/publication/51911189_A_Simple_Multi-Processor_Computer_Based_on_Subleq/download
-* https://github.com/davidar/subleq
+* https://www.researchgate.net/publication/51911189_A_Simple_Multi-Processor_Computer_Based_on_Subleq/download (SUBLEQ implemented in FPGA)
+* https://github.com/davidar/subleq (simulator and libraries)
 
