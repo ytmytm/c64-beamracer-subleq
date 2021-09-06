@@ -32,8 +32,17 @@ dl_start:
 	; make DL restart at mainloop so that program continues in the new frame
 	MOV		VREG_DLISTL, <dl_restart
 	MOV		VREG_DLISTH, >dl_restart
+	MOV		VREG_DLIST2L, <mainloop
+	MOV		VREG_DLIST2H, >mainloop
+
+	WAIT	300, 0  ; this WAIT can only complete on PAL - subsequent instructions won't be executed on an NTSC machine.
+	MOV		VREG_ADR1, <(frame_end+1)   ; adjust frame-end marker for PAL
+	MOV		VREG_ADR1+1, >(frame_end+1)
+	MOV		VREG_PORT1, <311
+	END
+
 dl_restart:
-	SETB		214 ;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
+;	SETB		214 ;; how many instructions to run per frame? we can't risk DL restart in the middle of self-modification routine
 					;; 214 is max, maybe even 215, this can be increased if all redundant writes to ADR0/1 high-bytes are optimized away
 	MOV		$20, 2		;; indicator start
 mainloop:
@@ -74,10 +83,6 @@ mainloop:
 	MOV		VREG_ADR1, <(addr2_2+1+2)
 	MOV		VREG_ADR1+1, >(addr2_2+1+2)
 	XFER		VREG_PORT1, (0) ;; hi byte of @a2
-
-	BRA addr1	; skip over next BRA
-mainback:
-	BRA mainloop	; we need this intermediate trampoline to go back more than 127 bytes from the end of the code to the beginning
 
 	;; read value from [a], put as step0 one place, to be negated, step0/1 set to 0, because we need this value twice
 addr1:
@@ -158,8 +163,11 @@ pcleq:
 pcrun:
 d020_val:
 	MOV		$20, 6	;; debug indicator
-	DECB			 ; do we still have time in current frame?
-	BRA		mainback ; yes, back to mainloop
+	SKIP
+frame_end:
+	WAIT	260,0   ; default frame-end marker suitable for NTSC
+	MOV		VREG_DL2STROBE, 0
+
 	MOV		$20, 15	 ; no, end this DL run
 	END
 
