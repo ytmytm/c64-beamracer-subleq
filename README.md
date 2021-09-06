@@ -45,7 +45,7 @@ The only possible instruction is "SUBtract and branch if Less-than or EQual to z
 It turns out that such machines are Turing Complete: using this single instruction
 we can define all operations needed for general computing.
 
-Since BeamRacer can execute programs written for SUBLEQ CPu I have proven that VASYL's ISA
+Since BeamRacer can execute programs written for SUBLEQ CPU I have proven that VASYL's ISA
 is also Turing Complete. This was not at all evident for me when I first started thinking about this project.
 
 There is a very nice introduction to SUBLEQ on [esolangs.org](https://esolangs.org/wiki/Subleq).
@@ -160,3 +160,4 @@ I'm not an experienced SUBLEQ programmer so the only examples I provide are debu
 * https://rosettacode.org/wiki/Subleq (implementations of Subleq VMs in various languages)
 * https://iq.opengenus.org/one-instruction-set-computer-oisc/ (JUMP, MOVE, ADD, NOT commands)
 * https://stackoverflow.com/questions/34120161/bitwise-operations-in-subleq (bitwise operators)
+* https://github.com/lawrencewoodman/sblasm/blob/master/examples/standard.asq (BNE, BEQ, INC, DEC, MUL, DIV, MOD)
