@@ -59,7 +59,7 @@ not_vasyl_irq:
 		MOV		VREG_DLISTH, >spinlock
 		MOV		$d021, 2
 		.if (* - dl_start) & $ff = $ff	; if spinlock would fall on a page's last byte
-			NOP					; we insert a dummy NOP to prevent that.
+			VNOP					; we insert a dummy NOP to prevent that.
 		.endif
 spinlock:
 		MOV		VREG_DLSTROBE, 0		; spin, baby, spin
