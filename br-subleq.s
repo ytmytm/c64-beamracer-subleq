@@ -62,8 +62,8 @@ not_vasyl_irq:
 			VNOP					; we insert a dummy NOP to prevent that.
 		.endif
 spinlock:
-		MOV		VREG_DLSTROBE, 0		; spin, baby, spin
-		.byte		0	; 0, 0 is WAIT 0, 0 which is a two-byte NOP.
+		MOV		VREG_DLSTROBE, $a7	; spin, baby, spin ; $a7 is VNOP, which we get pointed to
+								; once DLISTL is incremented
 		SKIP
 		WAIT		NTSC_LAST_SAFE_LINE, 0
 		BRA		safe_to_update	; we are still before NTSC's last safe line, and so also before PAL's.
