@@ -4,14 +4,79 @@
 ; Maciej 'YTM/Elysium' Witkowiak, 2021
 ;
 
-
+NTSC_LAST_SAFE_LINE = 259
+NTSC_LINE_COUNT = 263
+PAL_LAST_SAFE_LINE = 307
 
         .include "vlib/vasyl.s"
 
-        jsr knock_knock
-        jsr copy_and_activate_dlist
+	sei
+	lda	#<irq_handler
+	sta	$314
+	lda	#>irq_handler
+	sta	$315
+	cli
+
+	jsr knock_knock
+	jsr copy_and_activate_dlist
+
+@keyloop:
+	jsr $ffe4   ; check if key pressed
+	beq @keyloop
+
+	; stop VASYL and restore IRQ vector
+	lda	#0
+	sta	$d031
+	sei
+	lda	#$31
+	sta	$314
+	lda	#$ea
+	sta	$315
+	cli
  
 	rts
+
+irq_handler:
+	lda	$d019
+	and	#%00010000
+	beq	not_vasyl_irq
+
+	sta	$d019		; ack VASYL IRQ
+	lda	VREG_PORT0	; get the character to print
+	inc	VREG_DLISTL	; release VASYL from spinlock, as it is ok to run concurrently from now on
+	jsr	$FFD2		; CHROUT
+	jmp	$ea81		; pull regs from the stack and RTI
+
+not_vasyl_irq:
+	jmp	$ea31		; original IRQ routine
+
+
+	; Once VASYL enters a spinlock, only 6510 can stop it from spinning by
+	; incrementing VREG_DLISTL by one. Otherwise it will spin for an arbitrary amount of time
+	; (including across multiple frames).
+	.macro SPINLOCK
+		MOV		VREG_DLISTL, <spinlock	; potential race, so do not use just before frame's end
+		MOV		VREG_DLISTH, >spinlock
+		MOV		$d021, 2
+		.if (* - dl_start) & $ff = $ff	; if spinlock would fall on a page's last byte
+			NOP					; we insert a dummy NOP to prevent that.
+		.endif
+spinlock:
+		MOV		VREG_DLSTROBE, 0		; spin, baby, spin
+		.byte		0	; 0, 0 is WAIT 0, 0 which is a two-byte NOP.
+		SKIP
+		WAIT		NTSC_LAST_SAFE_LINE, 0
+		BRA		safe_to_update	; we are still before NTSC's last safe line, and so also before PAL's.
+		WAIT		NTSC_LINE_COUNT, 0	; this only completes on PAL, so an NTSC machine will restart (at spinlock+1)
+		SKIP
+		WAIT		PAL_LAST_SAFE_LINE, 0
+		BRA		safe_to_update	; we're on PAL and still before last safe line.
+		END				; wait for the next frame
+safe_to_update:
+		MOV		VREG_DLISTL, <dl_restart
+		MOV		VREG_DLISTH, >dl_restart
+	.endmacro
+
 
 	.include "vlib/vlib.s"
 
@@ -22,7 +87,6 @@
 	;;	[b] <- [b]-[a] = -[a]+[b]; if b<=0 then goto 0
 	;; instruction encoding:
 	;; (address to jump to when result negative or zero - c) (address to jump to when result positive) (address of a) (address of b (result))
-
 dl_start:
 	; enable reading from both ports, we're in bank0, DL enabled
 	MOV		VREG_CONTROL, %00011000	; this can be done from C64 setup
@@ -34,12 +98,57 @@ dl_start:
 	MOV		VREG_DLISTH, >dl_restart
 	MOV		VREG_DLIST2L, <mainloop
 	MOV		VREG_DLIST2H, >mainloop
+	MOV		$d01a, %00010000    ; enable VASYL interrupts
 
-	WAIT	300, 0  ; this WAIT can only complete on PAL - subsequent instructions won't be executed on an NTSC machine.
+	WAIT		300, 0  ; this WAIT can only complete on PAL - subsequent instructions won't be executed on an NTSC machine.
 	MOV		VREG_ADR1, <(frame_end+1)
 	MOV		VREG_ADR1+1, >(frame_end+1)
-	MOV		VREG_PORT1, <311	; default frame-end marker suitable for PAL
+	MOV		VREG_PORT1, <PAL_LAST_SAFE_LINE	; default frame-end marker suitable for PAL
 	END
+
+character_out:
+	MOV		$d021, 7
+	IRQ
+	MOV		VREG_ADR0, $ff
+	MOV		VREG_ADR0+1, $ff
+	SPINLOCK
+	MOV		$d021,6
+	BRA		char_out_done
+
+
+; comparator checks if both lo- and hi-byte are equal to $ff.
+comparator:
+comparator_addr:
+	MOV		VREG_STEP0, 0	; low byte
+	MOV		VREG_ADR0, <(iocheck_table+$80)
+	MOV		VREG_ADR0+1, >(iocheck_table+$80)
+	MOV		VREG_ADR1, <(comparator_addr2+1)
+	MOV		VREG_ADR1+1, >(comparator_addr2+1)
+	XFER		VREG_STEP1, (0)
+	XFER		VREG_PORT1, (0)
+	VNOP				; one waitcycle needed for the write above to land
+comparator_addr2:
+	SETA		0		; this will be modified
+	DECA
+	BRA		back_from_comparator
+comparator_addr3:
+	MOV		VREG_STEP0, 0	; hi byte
+	MOV		VREG_ADR0, <(iocheck_table+$80)
+	MOV		VREG_ADR0+1, >(iocheck_table+$80)
+	MOV		VREG_ADR1, <(comparator_addr4+1)
+	MOV		VREG_ADR1+1, >(comparator_addr4+1)
+	XFER		VREG_STEP1, (0)
+	XFER		VREG_PORT1, (0)
+	VNOP				; one waitcycle needed for the write above to land
+comparator_addr4:
+	SETA		0		; this will be modified
+	DECA
+char_out_done:
+	BRA		back_from_comparator
+	BRA		character_out
+comparator_trampoline:
+	BRA		comparator
+
 
 dl_restart:				;; new frame starts here
 	MOV		$20, 2		;; indicator start
@@ -63,7 +172,7 @@ mainloop:				;; new instruction processing starts here
 	XFER		VREG_PORT1, (0)	;; lo byte of [a]
 	XFER		VREG_PORT1, (0) ;; hi byte of [a]
 
-	;; copy address of [b] into two places: to read value to be negated and to store result of [b]-[a]
+	;; copy address of [b] into three places: to read value to be negated and to store result of [b]-[a]
 	MOV		VREG_STEP0, 0
 	MOV		VREG_STEP1, 0
 	MOV		VREG_ADR1, <(addr2+1)
@@ -71,6 +180,9 @@ mainloop:				;; new instruction processing starts here
 	XFER		VREG_PORT1, (0)	;; lo byte of [b]
 	MOV		VREG_ADR1, <(addr2_2+1)
 	MOV		VREG_ADR1+1, >(addr2_2+1)
+	XFER		VREG_PORT1, (0) ;; lo byte of [b]
+	MOV		VREG_ADR1, <(comparator_addr+1)
+	MOV		VREG_ADR1+1, >(comparator_addr+1)
 	MOV		VREG_STEP0, 1	; advance after next read
 	XFER		VREG_PORT1, (0) ;; lo byte of [b]
 
@@ -81,6 +193,9 @@ mainloop:				;; new instruction processing starts here
 	MOV		VREG_ADR1, <(addr2_2+1+2)
 	MOV		VREG_ADR1+1, >(addr2_2+1+2)
 	XFER		VREG_PORT1, (0) ;; hi byte of [b]
+	MOV		VREG_ADR1, <(comparator_addr3 + 1)
+	MOV		VREG_ADR1+1, >(comparator_addr3 + 1)
+	XFER		VREG_PORT1, (0) ;; hi byte of [b]
 
 	;; read value from [a], put as step 0 to be negated
 addr1:
@@ -89,6 +204,16 @@ addr1:
 	MOV		VREG_ADR1, <(addrval_a+1)
 	MOV		VREG_ADR1+1, >(addrval_a+1)
 	XFER		VREG_PORT1, (0)
+
+	;; put value from [a] in $ffff for possible use by the 6510
+	MOV		VREG_ADR1, $ff
+	MOV		VREG_ADR1+1, $ff
+	XFER		VREG_PORT1, (0)
+
+	BRA		comparator_trampoline
+back_from_comparator:
+	MOV		VREG_STEP0, 0
+	MOV		VREG_STEP1, 0
 addr2:
 	;; read value from [b], put as step 0 into add/sign table offsets
 	;; (step0,1 must be still set to 0, we read the value twice)
@@ -164,7 +289,7 @@ d020_val:
 	MOV		$20, 6			; debug indicator
 	SKIP
 frame_end:
-	WAIT		260,0   		; default frame-end marker suitable for NTSC
+	WAIT		NTSC_LAST_SAFE_LINE,0   		; default frame-end marker suitable for NTSC
 	MOV		VREG_DL2STROBE, 0
 
 	MOV		$20, 15	 		; we have no time for processing next instruction, end this DL run
@@ -199,6 +324,16 @@ negtable:
 	.byte <(-I)
 	.endrepeat
 
+iocheck_table:
+	.repeat 127
+	.byte 1
+	.endrep
+	.byte 0
+	.repeat 128
+	.byte 1
+	.endrep
+
+
 	; subleq program encoding
 	; <negative-jmp> <positive-jmp> <a> <b>; [b]<-[b]-[a]; if [b]-[a]<=0 then [negative-jmp] else [positive-jmp]
 
@@ -214,7 +349,7 @@ negtable:
 		.word :+	; link to next instruction (required for VASYL, not existing in pure Subleq)
 		.word addr_a	; [a]
 	.ifnblank addr_b
-		.word addr_b	; [b], [b]<-[b]-[a]
+		.word (addr_b & $ffff)	; [b], [b]<-[b]-[a]	;; "& $ffff" enables negative values
 	.else
 		.word addr_a	; if 2nd argument is omitted reuse [a]
 	.endif
@@ -236,6 +371,28 @@ vm_start:
 	subleq isseven, five		; 5-(-2)=5+2=7, five=7
 	subleq isseven			; zero-out location isseven
 
+	subleq negone, three		; 3-(-1)=4, three=4
+
+; Following code only works by lucky coincidence - just the lo-bytes of ptrs need to be adjusted.
+; We need 16-bit arithmetics!
+print_hello:
+	subleq char_counter
+terminator_check:
+	subleq zero, hello_txt, ploop
+printer:
+	subleq hello_txt, -1
+	subleq negone, terminator_check+6
+	subleq negone, printer+4
+	subleq negone, char_counter
+	subleq zero, zero, terminator_check
+ploop:
+	; restore start pointer
+	subleq char_counter, terminator_check+6
+	subleq char_counter, printer+4
+	subleq one, d020_val+1		; visual feedback
+	subleq zero, zero, print_hello	; jmp to beginning
+
+
 sloop:	; infinite loop that changes border color by modifying display list directly
 	.word sloop, sloop, one, d020_val+1
 	subleq zero, zero, sloop	; infinite loop
@@ -250,6 +407,9 @@ one:	.byte 1
 two:	.byte 2
 five:	.byte 5
 isseven:	.byte 0
+negone:	.byte $ff
+hello_txt:	.byte "vasyl says hello!", $0d, 0
+char_counter: .byte 0
 
 ; all the exports for debug purposes
 ; vpeek(seven) should be 4
@@ -280,3 +440,4 @@ isseven:	.byte 0
 .export addrval_b2
 .export setaval
 .export d020_val
+.export iocheck_table
