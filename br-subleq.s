@@ -43,8 +43,19 @@ irq_handler:
 
 	sta	$d019		; ack VASYL IRQ
 	lda	VREG_PORT0	; get the character to print
+	bne	do_output
+	cli			; enable interrupts so that the keyboard can work
+@keyloop:
+	jsr	$ffe4
+	beq	@keyloop
+	sta	VREG_PORT0
+	inc	VREG_DLISTL	; release VASYL from spinlock, as it is ok to run concurrently from now on
+	bne	irq_end	; always taken
+
+do_output:
 	inc	VREG_DLISTL	; release VASYL from spinlock, as it is ok to run concurrently from now on
 	jsr	$FFD2		; CHROUT
+irq_end:
 	jmp	$ea81		; pull regs from the stack and RTI
 
 not_vasyl_irq:
@@ -55,27 +66,42 @@ not_vasyl_irq:
 	; incrementing VREG_DLISTL by one. Otherwise it will spin for an arbitrary amount of time
 	; (including across multiple frames).
 	.macro SPINLOCK
-		MOV		VREG_DLISTL, <spinlock	; potential race, so do not use just before frame's end
-		MOV		VREG_DLISTH, >spinlock
+		MOV		VREG_DLISTL, <@spinlock	; potential race, so do not use just before frame's end
+		MOV		VREG_DLISTH, >@spinlock
 		MOV		$d021, 2
 		.if (* - dl_start) & $ff = $ff	; if spinlock would fall on a page's last byte
 			VNOP					; we insert a dummy NOP to prevent that.
 		.endif
-spinlock:
+@spinlock:
 		MOV		VREG_DLSTROBE, $a7	; spin, baby, spin ; $a7 is VNOP, which we get pointed to
 								; once DLISTL is incremented
 		SKIP
 		WAIT		NTSC_LAST_SAFE_LINE, 0
-		BRA		safe_to_update	; we are still before NTSC's last safe line, and so also before PAL's.
+		BRA		@safe_to_update	; we are still before NTSC's last safe line, and so also before PAL's.
 		WAIT		NTSC_LINE_COUNT, 0	; this only completes on PAL, so an NTSC machine will restart (at spinlock+1)
 		SKIP
 		WAIT		PAL_LAST_SAFE_LINE, 0
-		BRA		safe_to_update	; we're on PAL and still before last safe line.
+		BRA		@safe_to_update	; we're on PAL and still before last safe line.
 		END				; wait for the next frame
-safe_to_update:
+@safe_to_update:
 		MOV		VREG_DLISTL, <dl_restart
 		MOV		VREG_DLISTH, >dl_restart
 	.endmacro
+
+
+	.macro VJMP	label
+		MOV		VREG_DLIST2L, <label
+		MOV		VREG_DLIST2H, >label
+		MOV		VREG_DL2STROBE, 0
+	.endmacro
+
+	.macro VJNZA label
+		MOV		VREG_DLIST2L, <label
+		MOV		VREG_DLIST2H, >label
+		DECA
+		MOV		VREG_DL2STROBE, 0
+	.endmacro
+
 
 
 	.include "vlib/vlib.s"
@@ -96,8 +122,6 @@ dl_start:
 	; make DL restart at dl_restart so that program continues in the new frame
 	MOV		VREG_DLISTL, <dl_restart
 	MOV		VREG_DLISTH, >dl_restart
-	MOV		VREG_DLIST2L, <mainloop
-	MOV		VREG_DLIST2H, >mainloop
 	MOV		$d01a, %00010000    ; enable VASYL interrupts
 
 	WAIT		300, 0  ; this WAIT can only complete on PAL - subsequent instructions won't be executed on an NTSC machine.
@@ -113,8 +137,46 @@ character_out:
 	MOV		VREG_ADR0+1, $ff
 	SPINLOCK
 	MOV		$d021,6
-	BRA		char_out_done
+	VJMP		back_from_comparator
 
+character_in:
+	IRQ
+	MOV		VREG_ADR0, $ff
+	MOV		VREG_ADR0+1, $ff
+	MOV		VREG_STEP0, 0	; so that the byte can accessed multiple times
+	MOV		VREG_PORT0, 0	; signal to 6510 that we want input
+	SPINLOCK
+	VJMP		back_from_comparator_a
+
+
+; comparator checks if both lo- and hi-byte are equal to $ff.
+comparator_a:
+comparator_a_addr1:
+	MOV		VREG_STEP0, 0	; low byte
+	MOV		VREG_ADR0, <(iocheck_table+$80)
+	MOV		VREG_ADR0+1, >(iocheck_table+$80)
+	MOV		VREG_ADR1, <(comparator_a_addr2+1)
+	MOV		VREG_ADR1+1, >(comparator_a_addr2+1)
+	XFER		VREG_STEP1, (0)
+	XFER		VREG_PORT1, (0)
+	VNOP				; one waitcycle needed for the write above to land
+comparator_a_addr2:
+	SETA		0		; this will be modified
+	VJNZA		back_from_comparator_a
+comparator_a_addr3:
+	MOV		VREG_STEP0, 0	; hi byte
+	MOV		VREG_ADR0, <(iocheck_table+$80)
+	MOV		VREG_ADR0+1, >(iocheck_table+$80)
+	MOV		VREG_ADR1, <(comparator_a_addr4+1)
+	MOV		VREG_ADR1+1, >(comparator_a_addr4+1)
+	XFER		VREG_STEP1, (0)
+	XFER		VREG_PORT1, (0)
+	VNOP				; one waitcycle needed for the write above to land
+comparator_a_addr4:
+	SETA		0		; this will be modified
+	VJNZA		back_from_comparator_a
+	DECB				; I/O indicator
+	BRA		character_in
 
 ; comparator checks if both lo- and hi-byte are equal to $ff.
 comparator:
@@ -129,8 +191,8 @@ comparator_addr:
 	VNOP				; one waitcycle needed for the write above to land
 comparator_addr2:
 	SETA		0		; this will be modified
-	DECA
-	BRA		back_from_comparator
+	VJNZA		back_from_comparator
+
 comparator_addr3:
 	MOV		VREG_STEP0, 0	; hi byte
 	MOV		VREG_ADR0, <(iocheck_table+$80)
@@ -145,7 +207,8 @@ comparator_addr4:
 	DECA
 char_out_done:
 	BRA		back_from_comparator
-	BRA		character_out
+	DECB				; I/O indicator
+	VJMP		character_out
 comparator_trampoline:
 	BRA		comparator
 
@@ -166,11 +229,45 @@ mainloop:				;; new instruction processing starts here
 	XFER		VREG_PORT1, (0) ;; lo byte of new PC (if positive), branch after DECA not taken, just address of the next instruction
 	XFER		VREG_PORT1, (0) ;; hi byte of new PC (if positive), branch after DECA not taken, just address of the next instruction
 
-	;; copy address of [a] into place where [a] will be read
+	;; copy address of [a] into places where [a] will be read
+
+.if 1	;; three cycles shorter, but harder on the eyes
 	MOV		VREG_ADR1, <(addr1+1)
 	MOV		VREG_ADR1+1, >(addr1+1)
 	XFER		VREG_PORT1, (0)	;; lo byte of [a]
 	XFER		VREG_PORT1, (0) ;; hi byte of [a]
+
+	MOV		VREG_STEP0, -1
+	MOV		VREG_STEP1, (comparator_a_addr3 - comparator_a_addr1)
+	XFER		VREG_ADR1, (0)
+
+	MOV		VREG_ADR1, <(comparator_a_addr1 + 1)
+	MOV		VREG_ADR1+1, >(comparator_a_addr1 + 1)
+	XFER		VREG_PORT1, (0)
+	XFER		VREG_PORT1, (0)
+
+	MOV		VREG_STEP0, 3
+	XFER		VREG_STEP1, (0)
+.else
+	MOV		VREG_STEP0, 0
+	MOV		VREG_ADR1, <(addr1+1)
+	MOV		VREG_ADR1+1, >(addr1+1)
+	XFER		VREG_PORT1, (0)	;; lo byte of [a]
+	MOV		VREG_ADR1, <(comparator_a_addr1 + 1)
+	MOV		VREG_ADR1+1, >(comparator_a_addr1 + 1)
+	MOV		VREG_STEP0, 1
+	XFER		VREG_PORT1, (0)	;; lo byte of [a]
+
+	MOV		VREG_STEP0, 0
+	MOV		VREG_ADR1, <(addr1+3)
+	MOV		VREG_ADR1+1, >(addr1+3)
+	XFER		VREG_PORT1, (0) ;; hi byte of [a]
+	MOV		VREG_ADR1, <(comparator_a_addr3 + 1)
+	MOV		VREG_ADR1+1, >(comparator_a_addr3 + 1)
+	MOV		VREG_STEP0, 1
+	XFER		VREG_PORT1, (0) ;; hi byte of [a]
+.endif
+
 
 	;; copy address of [b] into three places: to read value to be negated and to store result of [b]-[a]
 	MOV		VREG_STEP0, 0
@@ -197,6 +294,10 @@ mainloop:				;; new instruction processing starts here
 	MOV		VREG_ADR1+1, >(comparator_addr3 + 1)
 	XFER		VREG_PORT1, (0) ;; hi byte of [b]
 
+	SETB		2	; I/O operation marker
+	VJMP		comparator_a
+back_from_comparator_a:
+	MOV		VREG_STEP0, 0
 	;; read value from [a], put as step 0 to be negated
 addr1:
 	MOV		VREG_ADR0, 0	; this will be modified
@@ -212,6 +313,19 @@ addr1:
 
 	BRA		comparator_trampoline
 back_from_comparator:
+
+	DECB
+	BRA		no_output
+	BRA		pcpos		; counter B == 0, output requested
+no_output:
+	DECB
+	BRA		no_input
+	MOV		VREG_ADR0, $ff
+	MOV		VREG_ADR0+1, $ff
+	SETB		1
+	BRA		just_store_a
+no_input:
+	
 	MOV		VREG_STEP0, 0
 	MOV		VREG_STEP1, 0
 addr2:
@@ -258,6 +372,7 @@ addrval_b:
 	MOV		VREG_STEP1, 0	; PORT1 will be written thrice, we only want to know last value
 	MOV		VREG_ADR0,   <(addtable+$100)	; middle of the table, position of '0'
 	MOV		VREG_ADR0+1, >(addtable+$100)	; middle of the table, position of '0'
+just_store_a:
 addr2_2:
 	;; store result in b
 	MOV		VREG_ADR1, 0		; this will be modified
@@ -265,6 +380,8 @@ addr2_2:
 addrval_aneg2:
 	MOV		VREG_STEP0, 0		; step here will be -[a] value (-128,127)
 	XFER		VREG_PORT1, (0)		; read value at 0, move from 0 to -[a] value
+	DECB			; check input marker
+	BRA		pcpos
 addrval_b2:
 	MOV		VREG_STEP0, 0		; step here will be [b] value (-128,127)
 	XFER		VREG_PORT1, (0)		; read value at -[a], move from -[a] to [b] value
@@ -287,6 +404,8 @@ pcleq:
 pcrun:
 d020_val:
 	MOV		$20, 6			; debug indicator
+	MOV		VREG_DLIST2L, <mainloop
+	MOV		VREG_DLIST2H, >mainloop
 	SKIP
 frame_end:
 	WAIT		NTSC_LAST_SAFE_LINE,0   		; default frame-end marker suitable for NTSC
@@ -347,11 +466,11 @@ iocheck_table:
 		.word :+	; if ommited then point to the next instruction
 	.endif
 		.word :+	; link to next instruction (required for VASYL, not existing in pure Subleq)
-		.word addr_a	; [a]
+		.word (addr_a & $ffff)	; [a]
 	.ifnblank addr_b
 		.word (addr_b & $ffff)	; [b], [b]<-[b]-[a]	;; "& $ffff" enables negative values
 	.else
-		.word addr_a	; if 2nd argument is omitted reuse [a]
+		.word (addr_a & $ffff)	; if 2nd argument is omitted reuse [a]
 	.endif
 	:
 	.endmacro
@@ -372,6 +491,15 @@ vm_start:
 	subleq isseven			; zero-out location isseven
 
 	subleq negone, three		; 3-(-1)=4, three=4
+
+
+typist:
+	subleq -1, char
+	subleq char, -1
+	subleq char_w, char, not_lower	; break on 'X'
+	subleq one, char, print_hello
+not_lower:
+	subleq zero, zero, typist
 
 ; Following code only works by lucky coincidence - just the lo-bytes of ptrs need to be adjusted.
 ; We need 16-bit arithmetics!
@@ -410,6 +538,9 @@ isseven:	.byte 0
 negone:	.byte $ff
 hello_txt:	.byte "vasyl says hello!", $0d, 0
 char_counter: .byte 0
+char: .byte 0
+char_w: .byte "w"
+char_x: .byte "x"
 
 ; all the exports for debug purposes
 ; vpeek(seven) should be 4
@@ -441,3 +572,4 @@ char_counter: .byte 0
 .export setaval
 .export d020_val
 .export iocheck_table
+.export char
