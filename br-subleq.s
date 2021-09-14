@@ -70,14 +70,14 @@ not_vasyl_irq:
 		MOV		VREG_DLISTH, >@spinlock
 		MOV		$d021, 2
 		.if (* - dl_start) & $ff = $ff	; if spinlock would fall on a page's last byte
-			VNOP					; we insert a dummy NOP to prevent that.
+			VNOP			; we insert a dummy NOP to prevent that.
 		.endif
 @spinlock:
-		MOV		VREG_DLSTROBE, $a7	; spin, baby, spin ; $a7 is VNOP, which we get pointed to
-								; once DLISTL is incremented
+		MOV		VREG_DLSTROBE, $a7	; spin, baby, spin ; $a7 is a VNOP, which we get pointed to
+							; once DLISTL is incremented
 		SKIP
 		WAIT		NTSC_LAST_SAFE_LINE, 0
-		BRA		@safe_to_update	; we are still before NTSC's last safe line, and so also before PAL's.
+		BRA		@safe_to_update		; we are still before NTSC's last safe line, and so also before PAL's.
 		WAIT		NTSC_LINE_COUNT, 0	; this only completes on PAL, so an NTSC machine will restart (at spinlock+1)
 		SKIP
 		WAIT		PAL_LAST_SAFE_LINE, 0
@@ -89,12 +89,14 @@ not_vasyl_irq:
 	.endmacro
 
 
+	; VJMP is a long-range jump
 	.macro VJMP	label
 		MOV		VREG_DLIST2L, <label
 		MOV		VREG_DLIST2H, >label
 		MOV		VREG_DL2STROBE, 0
 	.endmacro
 
+	; VJNZA - long-range jump if counter A is non-zero
 	.macro VJNZA label
 		MOV		VREG_DLIST2L, <label
 		MOV		VREG_DLIST2H, >label
@@ -124,20 +126,18 @@ dl_start:
 	MOV		VREG_DLISTH, >dl_restart
 	MOV		$d01a, %00010000    ; enable VASYL interrupts
 
-	WAIT		300, 0  ; this WAIT can only complete on PAL - subsequent instructions won't be executed on an NTSC machine.
+	WAIT		NTSC_LINE_COUNT, 0  ; this WAIT can only complete on PAL - subsequent instructions won't be executed on an NTSC machine.
 	MOV		VREG_ADR1, <(frame_end+1)
 	MOV		VREG_ADR1+1, >(frame_end+1)
 	MOV		VREG_PORT1, <PAL_LAST_SAFE_LINE	; default frame-end marker suitable for PAL
 	END
 
 character_out:
-	MOV		$d021, 7
 	IRQ
 	MOV		VREG_ADR0, $ff
 	MOV		VREG_ADR0+1, $ff
 	SPINLOCK
-	MOV		$d021,6
-	VJMP		back_from_comparator
+	VJMP		back_from_comparator_b
 
 character_in:
 	IRQ
@@ -179,38 +179,38 @@ comparator_a_addr4:
 	BRA		character_in
 
 ; comparator checks if both lo- and hi-byte are equal to $ff.
-comparator:
-comparator_addr:
+comparator_b:
+comparator_b_addr:
 	MOV		VREG_STEP0, 0	; low byte
 	MOV		VREG_ADR0, <(iocheck_table+$80)
 	MOV		VREG_ADR0+1, >(iocheck_table+$80)
-	MOV		VREG_ADR1, <(comparator_addr2+1)
-	MOV		VREG_ADR1+1, >(comparator_addr2+1)
+	MOV		VREG_ADR1, <(comparator_b_addr2+1)
+	MOV		VREG_ADR1+1, >(comparator_b_addr2+1)
 	XFER		VREG_STEP1, (0)
 	XFER		VREG_PORT1, (0)
 	VNOP				; one waitcycle needed for the write above to land
-comparator_addr2:
+comparator_b_addr2:
 	SETA		0		; this will be modified
-	VJNZA		back_from_comparator
+	VJNZA		back_from_comparator_b
 
-comparator_addr3:
+comparator_b_addr3:
 	MOV		VREG_STEP0, 0	; hi byte
 	MOV		VREG_ADR0, <(iocheck_table+$80)
 	MOV		VREG_ADR0+1, >(iocheck_table+$80)
-	MOV		VREG_ADR1, <(comparator_addr4+1)
-	MOV		VREG_ADR1+1, >(comparator_addr4+1)
+	MOV		VREG_ADR1, <(comparator_b_addr4+1)
+	MOV		VREG_ADR1+1, >(comparator_b_addr4+1)
 	XFER		VREG_STEP1, (0)
 	XFER		VREG_PORT1, (0)
 	VNOP				; one waitcycle needed for the write above to land
-comparator_addr4:
+comparator_b_addr4:
 	SETA		0		; this will be modified
 	DECA
 char_out_done:
-	BRA		back_from_comparator
+	BRA		back_from_comparator_b
 	DECB				; I/O indicator
 	VJMP		character_out
-comparator_trampoline:
-	BRA		comparator
+comparator_b_trampoline:
+	BRA		comparator_b
 
 
 dl_restart:				;; new frame starts here
@@ -268,7 +268,6 @@ mainloop:				;; new instruction processing starts here
 	XFER		VREG_PORT1, (0) ;; hi byte of [a]
 .endif
 
-
 	;; copy address of [b] into three places: to read value to be negated and to store result of [b]-[a]
 	MOV		VREG_STEP0, 0
 	MOV		VREG_STEP1, 0
@@ -278,8 +277,8 @@ mainloop:				;; new instruction processing starts here
 	MOV		VREG_ADR1, <(addr2_2+1)
 	MOV		VREG_ADR1+1, >(addr2_2+1)
 	XFER		VREG_PORT1, (0) ;; lo byte of [b]
-	MOV		VREG_ADR1, <(comparator_addr+1)
-	MOV		VREG_ADR1+1, >(comparator_addr+1)
+	MOV		VREG_ADR1, <(comparator_b_addr+1)
+	MOV		VREG_ADR1+1, >(comparator_b_addr+1)
 	MOV		VREG_STEP0, 1	; advance after next read
 	XFER		VREG_PORT1, (0) ;; lo byte of [b]
 
@@ -290,8 +289,8 @@ mainloop:				;; new instruction processing starts here
 	MOV		VREG_ADR1, <(addr2_2+1+2)
 	MOV		VREG_ADR1+1, >(addr2_2+1+2)
 	XFER		VREG_PORT1, (0) ;; hi byte of [b]
-	MOV		VREG_ADR1, <(comparator_addr3 + 1)
-	MOV		VREG_ADR1+1, >(comparator_addr3 + 1)
+	MOV		VREG_ADR1, <(comparator_b_addr3 + 1)
+	MOV		VREG_ADR1+1, >(comparator_b_addr3 + 1)
 	XFER		VREG_PORT1, (0) ;; hi byte of [b]
 
 	SETB		2	; I/O operation marker
@@ -311,18 +310,18 @@ addr1:
 	MOV		VREG_ADR1+1, $ff
 	XFER		VREG_PORT1, (0)
 
-	BRA		comparator_trampoline
-back_from_comparator:
+	BRA		comparator_b_trampoline
+back_from_comparator_b:
 
 	DECB
 	BRA		no_output
-	BRA		pcpos		; counter B == 0, output requested
+	BRA		pcpos		; counter B == 0, output requested, we can skip all the arithmetics and B storing
 no_output:
 	DECB
 	BRA		no_input
-	MOV		VREG_ADR0, $ff
+	MOV		VREG_ADR0, $ff	; input received, we only need to store it in B
 	MOV		VREG_ADR0+1, $ff
-	SETB		1
+	SETB		1		; this will cause the arithmetics to be skipped
 	BRA		just_store_a
 no_input:
 	
@@ -380,8 +379,8 @@ addr2_2:
 addrval_aneg2:
 	MOV		VREG_STEP0, 0		; step here will be -[a] value (-128,127)
 	XFER		VREG_PORT1, (0)		; read value at 0, move from 0 to -[a] value
-	DECB			; check input marker
-	BRA		pcpos
+	DECB					; check input marker - if we're executing the IO path (B is 1),
+	BRA		pcpos			; we've done all we need to, so let's move on to the next instruction
 addrval_b2:
 	MOV		VREG_STEP0, 0		; step here will be [b] value (-128,127)
 	XFER		VREG_PORT1, (0)		; read value at -[a], move from -[a] to [b] value
@@ -496,9 +495,8 @@ vm_start:
 typist:
 	subleq -1, char
 	subleq char, -1
-	subleq char_w, char, not_lower	; break on 'X'
+	subleq char_w, char, typist	; break on 'X'
 	subleq one, char, print_hello
-not_lower:
 	subleq zero, zero, typist
 
 ; Following code only works by lucky coincidence - just the lo-bytes of ptrs need to be adjusted.
